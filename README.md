@@ -75,3 +75,14 @@ To connect to WiFi, you need to provide your SSID and password in the [project/p
 * `$()`: executes this command and substitutes its output.
 
 Purpose: This is useful when working with serial devices (like Arduino or other USB-connected hardware). By adding yourself to the device's group, you gain permission to access `/dev/ttyACM0` without needing sudo every time.
+
+
+
+The project has implemented the following user stories:
+
+1. As a user, I want to see a boot screen to display the current program version and team number for at least 3 seconds.
+2. As a user, I want to see the weather forecast in terms of temperature for the next 24 hours for my selected city on the starting screen.
+3. As a user, I want a menu to navigate between diMerent screens using the two buttons, like forecast and settings screen.
+4. As a user, I want to access the menu (overview of screens) from anywhere in the program.
+5. As a user, I want to see temperature and weather conditions with symbols (e.g., clear sky, rain, snow, thunder) for the next 24 hours on the starting screen.
+
