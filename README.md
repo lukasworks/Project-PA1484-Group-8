@@ -82,7 +82,7 @@ Purpose: This is useful when working with serial devices (like Arduino or other 
 
 - [x] US_1.1: As a user, I want to see a boot screen to display the current program version and team number for at least 3 seconds.
 - [x] US_1.2: As a user, I want to see the weather forecast in terms of temperature for the next 24 hours for my selected city on the starting screen.
-- [x] US_2.1:As a user, I want a menu to navigate between diMerent screens using the two buttons, like forecast and settings screen.
-- [x] US_2.2:As a user, I want to access the menu (overview of screens) from anywhere in the program.
-- [x] US_1.2B:As a user, I want to see temperature and weather conditions with symbols (e.g., clear sky, rain, snow, thunder) for the next 24 hours on the starting screen.
+- [x] US_2.1: As a user, I want a menu to navigate between diMerent screens using the two buttons, like forecast and settings screen.
+- [x] US_2.2: As a user, I want to access the menu (overview of screens) from anywhere in the program.
+- [x] US_1.2B: As a user, I want to see temperature and weather conditions with symbols (e.g., clear sky, rain, snow, thunder) for the next 24 hours on the starting screen.
 
