@@ -1,0 +1,377 @@
+#ifdef CORE_DEBUG_LEVEL // Check if CORE_DEBUG_LEVEL is already defined
+#undef CORE_DEBUG_LEVEL // Remove the previous definition of CORE_DEBUG_LEVEL
+#endif // Check if LOG_LOCAL_LEVEL is already defined
+
+#define CORE_DEBUG_LEVEL 5 // Set the core debug level to 5 (debug level)
+#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG // Set the log level to debug
+
+#define BOARD_HAS_PSRAM // Enable PSRAM for the ESP32-S3 board
+#define BUTTON_HOLD_TIME 300 // Time in milliseconds to hold the button for action
+
+#include <Arduino.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_adc_cal.h"
+#include <SPI.h>
+#include "pin_config.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
+#include <time.h>
+#include <StreamString.h>
+
+// Remember to remove these before commiting in GitHub
+String ssid = "";
+String password = "";
+
+// "tft" is the graphics libary, which has functions to draw on the screen
+TFT_eSPI tft = TFT_eSPI();
+
+// Display dimentions
+#define DISPLAY_WIDTH 320
+#define DISPLAY_HEIGHT 170
+
+WiFiClient wifi_client; // Create a WiFiClient object
+HTTPClient http; // Create an HTTPClient object
+
+/**
+ * Setup function
+ * This function is called once when the program starts to initialize the program
+ * and set up the hardware.
+ * Carefull when modifying this function.
+ */
+void setup() {
+  // Initialize Serial for debugging
+  Serial.begin(115200);
+  // Wait for the Serial port to be ready
+  while (!Serial);
+  Serial.println("Starting ESP32 program...");
+  tft.init();
+  tft.setRotation(1);
+  tft.fillScreen(TFT_BLACK);
+
+  pinMode(PIN_BUTTON_1, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_2, INPUT_PULLUP);
+
+  // Connect to WIFI
+  WiFi.begin(ssid, password);
+
+  // Will be stuck here until a proper wifi is configured
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString("Connecting to WiFi...", 10, 10);
+    Serial.println("Attempting to connect to WiFi...");
+  }
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.drawString("Connected to WiFi", 10, 10);
+  Serial.println("Connected to WiFi");
+  // Add your code bellow
+  delay(1000); // Wait for 1 second before proceeding
+}
+
+// Define the program version
+const char* programVersion = "v1.1.0"; // Update this as needed
+
+float lat = 56.1500; // Latitude for the weather forecast
+float lon = 15.5890; // Longitude for the weather forecast
+
+bool start_shown = false; // Flag to check if the text has been shown
+bool forecast_shown = false; // Flag to check if the forecast has been shown
+bool settings_shown = false; // Flag to check if the settings have been shown
+bool menu_shown = false; // Flag to check if the menu has been shown
+
+unsigned long buttonPressTime = 0; // Variable to store the time when the button is pressed
+
+/**
+ * This is the main loop function that runs continuously after setup.
+ * Add your code here to perform tasks repeatedly.
+ */
+
+void loop() {
+  if (!start_shown) {
+    tft.fillScreen(TFT_BLACK); // Clear the screen
+    tft.setTextColor(TFT_WHITE, TFT_BLACK); // Set text color to white
+    tft.setTextSize(2); // Set text size to 2
+
+    tft.drawString("Program version:", 10, 10); // Display version text
+    tft.drawString(programVersion, 10, 40); // Display the program version
+    tft.drawString("Group 8", 10, 70); // Display group name
+
+    delay(3000); // Display for 3 seconds
+    tft.fillScreen(TFT_BLACK); // Clear the screen
+    start_shown = true; // Set the flag to true to prevent showing the text again
+  }
+  
+  if (!forecast_shown) {
+    String payload = http_client(lat, lon); // Call the HTTP client function with coordinates
+    forecast_screen(payload); // Call the forecast screen function with the payload
+    forecast_shown = true; // Set the flag to true to prevent showing the forecast again
+  }
+  
+  if (digitalRead(PIN_BUTTON_1) == LOW && digitalRead(PIN_BUTTON_2) == HIGH) { // Check if button 1 is pressed (LOW) and button 2 is not pressed (HIGH)
+    forecast_shown = false; // Set the flag to false to allow showing the forecast again
+    settings_shown = true; // Set the flag to true to prevent showing the settings again
+    menu_shown = true; // Set the flag to true to prevent showing the menu again
+    String payload = http_client(lat, lon); // Call the HTTP client function with coordinates
+    forecast_screen(payload); // Call the forecast screen function with the payload
+    forecast_shown = true; // Set the flag to true to prevent showing the forecast again
+  }
+  if (digitalRead(PIN_BUTTON_1) == HIGH && digitalRead(PIN_BUTTON_2) == LOW) { // Check if button 1 is not pressed (HIGH) and button 2 is pressed (LOW)
+    settings_shown = false; // Set the flag to false to allow showing the settings again
+    forecast_shown = true; // Set the flag to true to prevent showing the forecast again
+    menu_shown = true; // Set the flag to true to prevent showing the menu again
+    settings_screen(); // Call the settings screen function
+    settings_shown = true; // Set the flag to true to prevent showing the settings again
+  }
+  if (digitalRead(PIN_BUTTON_1) == LOW && digitalRead(PIN_BUTTON_2) == LOW) { // Check if both buttons are pressed (LOW)
+    menu_shown = false; // Set the flag to false to allow showing the menu again
+    if (!menu_shown) {
+      buttonPressTime = millis(); // Get the current time in milliseconds
+      // Check if the buttons are held down for longer than BUTTON_HOLD_TIME (500 ms)
+      if (buttonPressTime >= BUTTON_HOLD_TIME) { 
+        forecast_shown = true; // Set the flag to true to prevent showing the forecast again
+        settings_shown = true; // Set the flag to true to prevent showing the settings again
+        menu(); // Call the menu function
+        menu_shown = true; // Set the flag to true to prevent showing the menu again
+        buttonPressTime = 0; // Reset the button press time
+      }
+    }
+  }   
+}
+
+
+String http_client(float lat, float lon) {
+  char lat_str[10], lon_str[10]; // Buffers for latitude and longitude strings
+
+  // Convert float to String (with 4 decimals)
+  dtostrf(lat, 6, 4, lat_str); // Convert latitude to string
+  dtostrf(lon, 6, 4, lon_str);
+
+  char url[256]; // Buffer for the URL
+  sprintf(url, "http://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/%s/lat/%s/data.json", lon_str, lat_str); // Create the URL string
+  // Serial.println("Fetching: " + String(url)); // Print the URL to the Serial monitor
+
+  http.setTimeout(10000);  // Set timeout for the HTTP request
+  http.begin(wifi_client, url); // Start the HTTP connection
+  http.addHeader("Accept-Encoding", "identity"); // Add header to avoid gzip encoding
+  int httpCode = http.GET(); // Send the GET request
+
+  tft.fillScreen(TFT_BLACK); // Clear display before showing result
+
+  if (httpCode > 0) {
+    if (httpCode == HTTP_CODE_OK) { // Check if the response is OK (200)
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.setTextSize(1);
+
+      StreamString payload; // Create a StreamString object to hold the payload
+      payload.reserve(350000); // Reserve memory for the payload string
+      int httpErr = http.writeToStream(&payload); // Write the response to the StreamString object
+      if (httpErr < 0) {
+        Serial.println("Error: " + String(httpErr) + " bytes"); // Print the error message to the Serial monitor
+      }
+      if (payload.indexOf("approvedTime") != -1) { // Check if the payload contains "approvedTime"
+      } else {
+        Serial.println("Payload does not contain approved time"); // Print the message to the Serial monitor
+      }
+      http.end(); // End the HTTP connection
+      return payload; // Return the payload string
+    } else {
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+      tft.drawString("Server Response:", 10, 10);
+      tft.drawString("HTTP Code: " + String(httpCode), 10, 30);
+    }
+
+  } else if (httpCode == 0) {
+    Serial.println("Connection failed: No response (code 0)");
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("Error: No response", 10, 10);
+    tft.drawString("Connection failed.", 10, 30);
+
+  } else {
+    String errorStr = http.errorToString(httpCode).c_str();
+    Serial.println("Internal Error: " + errorStr);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("Internal HTTP Error", 10, 10);
+    tft.drawString(errorStr, 10, 30);
+  }
+
+  http.end(); // End the HTTP connection
+  return ""; // Return an empty string if there was an error
+}
+
+
+void forecast_screen(String payload) {
+  tft.fillScreen(TFT_BLACK); // Clear the screen
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+
+  DynamicJsonDocument doc(3500000); // Create a JSON document with a capacity of 350000 bytes
+  DeserializationError error = deserializeJson(doc, payload); // Deserialize the JSON payload
+
+  if (error) {
+    Serial.println("JSON deserialization failed: ");
+    Serial.println(error.c_str());
+    tft.drawString("JSON failed!", 10, 10);
+    return;
+  }
+
+  tft.fillScreen(TFT_BLACK); 
+  tft.setTextColor(TFT_WHITE, TFT_BLACK); 
+  tft.setTextSize(1);
+
+  JsonArray timeSeries = doc["timeSeries"]; // Get the time series array from the JSON document
+  int count = 0; // Initialize count to 0
+
+  for (JsonObject entry : timeSeries) { // Loop through each entry in the time series array
+    if (count >= 24) break; // Limit to 24 entries
+
+    const char* validTime = entry["validTime"]; // Get the valid time string
+    JsonArray parameters = entry["parameters"]; // Get the parameters array
+
+    for (JsonObject param : parameters) { // Loop through parameters
+      if (strcmp(param["name"], "t") == 0) { // Check if the parameter is "t" (temperature)
+        float temperature = param["values"][0]; // Get the temperature value
+
+        // Extract hour as string: e.g., "08"
+        String sub_validTime = String(validTime).substring(11, 13);
+        int hour = sub_validTime.toInt() + 2; // Add 2 hours to the hour value
+        if (hour == 25) {
+          hour = 1; // Reset to 1 if it exceeds 24
+        }
+
+        // Format to show: e.g., "08 11.5(C)"
+        String displayText = String(hour) + " " + String(int(round(temperature))) + "(C)"; // Round temperature to nearest integer
+
+        // 8x4 layout for time and temperature
+        int x = 10 + (count % 4) * 85; // Calculate x position based on count
+        int y = 5 + (count / 4) * 30; // Calculate y position based on count
+
+        // Get weather symbol (Wsymb2) from parameters
+        for (JsonObject param : parameters) { // Loop through parameters to find Wsymb2
+          if (strcmp(param["name"], "Wsymb2") == 0) { // Check if the parameter is Wsymb2
+            int weatherSymbol = param["values"][0];  // Get weather symbol value
+            switch (weatherSymbol) {
+              case 1: case 2: case 3: case 4:
+                drawClearSky(x, y + 5); // Draw clear sky icon
+                break;
+              case 5: case 6: case 7:
+                drawFog(x, y + 5); // Draw fog icon
+                break;
+              case 8: case 9: case 10:
+              case 12: case 13: case 14:
+              case 15: case 18: case 19:
+              case 20:
+                drawRain(x, y + 5); // Draw rain icon
+                break;
+              case 11: case 21:
+                drawThunderstorm(x, y + 5); // Draw thunderstorm icon
+                break;
+              case 16: case 17:
+              case 22: case 23: case 24:
+              case 25: case 26: case 27:
+                drawSnow(x, y + 5); // Draw snow icon
+                break;
+            }
+            break; // Stop looping once symbol is found and drawn
+          }
+        }
+
+        tft.drawString(displayText, x, y); // Display time and temperature
+
+        count++;
+        break;
+      }
+    }
+  }
+}
+
+
+// Function to draw clear sky (small sun)
+void drawClearSky(int x, int y) {
+  tft.fillCircle(x, y, 8, TFT_YELLOW);  // Smaller sun icon
+}
+
+
+// Function to draw rain (small sun + tiny drops)
+void drawRain(int x, int y) {
+  tft.fillCircle(x, y, 6, TFT_YELLOW);  // Small sun icon
+  tft.drawLine(x - 4, y + 6, x - 4, y + 12, TFT_BLUE); // Raindrop 1
+  tft.drawLine(x + 4, y + 6, x + 4, y + 12, TFT_BLUE); // Raindrop 2
+}
+
+
+// Function to draw snow (small cloud + small flakes)
+void drawSnow(int x, int y) {
+  tft.fillCircle(x, y, 6, TFT_WHITE);  // Small snow cloud
+  tft.drawLine(x - 4, y + 6, x - 4, y + 12, TFT_WHITE); // Snowflake 1
+  tft.drawLine(x + 4, y + 6, x + 4, y + 12, TFT_WHITE); // Snowflake 2
+}
+
+
+// Function to draw thunderstorm (small sun + small bolt)
+void drawThunderstorm(int x, int y) {
+  tft.fillCircle(x, y, 6, TFT_YELLOW);  // Small sun
+  tft.drawLine(x, y + 5, x, y + 12, TFT_WHITE); // Lightning bolt
+}
+
+
+// Function to draw fog (small bars)
+void drawFog(int x, int y) {
+  tft.fillRect(x - 8, y, 16, 3, TFT_LIGHTGREY); // First fog line
+  tft.fillRect(x - 8, y + 5, 16, 3, TFT_LIGHTGREY); // Second fog line
+}
+
+
+void settings_screen() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+
+  tft.drawString("Settings", 10, 10);
+}
+
+
+void menu() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+
+  tft.drawString("Menu", 10, 10);
+}
+
+
+// TFT Pin check
+  //////////////////
+ // DO NOT TOUCH //
+//////////////////
+#if PIN_LCD_WR  != TFT_WR || \
+    PIN_LCD_RD  != TFT_RD || \
+    PIN_LCD_CS    != TFT_CS   || \
+    PIN_LCD_DC    != TFT_DC   || \
+    PIN_LCD_RES   != TFT_RST  || \
+    PIN_LCD_D0   != TFT_D0  || \
+    PIN_LCD_D1   != TFT_D1  || \
+    PIN_LCD_D2   != TFT_D2  || \
+    PIN_LCD_D3   != TFT_D3  || \
+    PIN_LCD_D4   != TFT_D4  || \
+    PIN_LCD_D5   != TFT_D5  || \
+    PIN_LCD_D6   != TFT_D6  || \
+    PIN_LCD_D7   != TFT_D7  || \
+    PIN_LCD_BL   != TFT_BL  || \
+    TFT_BACKLIGHT_ON   != HIGH  || \
+    170   != TFT_WIDTH  || \
+    320   != TFT_HEIGHT
+#error  "Error! Please make sure <User_Setups/Setup206_LilyGo_T_Display_S3.h> is selected in <TFT_eSPI/User_Setup_Select.h>"
+#error  "Error! Please make sure <User_Setups/Setup206_LilyGo_T_Display_S3.h> is selected in <TFT_eSPI/User_Setup_Select.h>"
+#error  "Error! Please make sure <User_Setups/Setup206_LilyGo_T_Display_S3.h> is selected in <TFT_eSPI/User_Setup_Select.h>"
+#error  "Error! Please make sure <User_Setups/Setup206_LilyGo_T_Display_S3.h> is selected in <TFT_eSPI/User_Setup_Select.h>"
+#endif
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,0,0)
+#error  "The current version is not supported for the time being, please use a version below Arduino ESP32 3.0"
+#endif
