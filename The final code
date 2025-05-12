@@ -75,7 +75,7 @@ void setup() {
 }
 
 // Define the program version
-const char* programVersion = "v1.1.0"; // Update this as needed
+const char* programVersion = "v1.2.0"; // Update this as needed
 
 float lat = 56.1500; // Latitude for the weather forecast
 float lon = 15.5890; // Longitude for the weather forecast
